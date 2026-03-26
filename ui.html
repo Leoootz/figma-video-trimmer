@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body::-webkit-scrollbar { width: 4px; }
+  body::-webkit-scrollbar-track { background: transparent; }
+  body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  :root {
+    --bg: #0e0e0f; --surface: #1a1a1c; --border: #2e2e32;
+    --accent: #5a8aff; --accent-dim: #4070e0;
+    --text: #f0f0ee; --muted: #6b6b72; --danger: #ff4f4f;
+    --handle: #ffffff; --radius: 1px;
+  }
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100%; padding: 18px;
+    display: flex; flex-direction: column; gap: 16px;
+    overflow-y: auto;
+  }
+  h1 { font-size: 18px; font-weight: 400; color: var(--text); letter-spacing: 0.1px; }
+  .subtitle { font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
+
+  /* ── Dropzone ── */
+  #dropzone {
+    border: 1.5px dashed var(--border); border-radius: var(--radius);
+    padding: 28px 20px; text-align: center; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: var(--surface);
+  }
+  #dropzone.drag-over { border-color: var(--accent); background: rgba(90,138,255,0.06); }
+  .drop-icon { font-size: 24px; margin-bottom: 8px; display: block; pointer-events: none; }
+  .drop-label { font-size: 11px; color: var(--muted); line-height: 1.6; pointer-events: none; }
+  .drop-label span { color: var(--accent); font-weight: 600; }
+
+  /* ── Video preview ── */
+  #preview-wrap { display: none; flex-direction: column; gap: 10px; }
+  #preview-wrap.visible { display: flex; }
+
+  #video-preview {
+    width: 100%; border-radius: var(--radius);
+    background: #000; display: block;
+    border: 1px solid var(--border);
+    max-height: 180px; object-fit: contain;
+  }
+
+  /* ── Playhead / time ── */
+  .playhead-row { display: flex; align-items: center; gap: 8px; }
+  #btn-play {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-size: 13px;
+    width: 28px; height: 28px; border-radius: var(--radius);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; padding: 0; transition: border-color 0.15s; font-family: inherit;
+  }
+  #btn-play:hover { border-color: var(--accent); }
+  #time-display { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }
+  #time-display span { color: var(--text); font-weight: 600; }
+
+  /* ── Timeline ── */
+  #timeline-wrap {
+    position: relative; height: 48px; user-select: none; cursor: crosshair;
+    border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border);
+  }
+  #thumb-strip { position: absolute; inset: 0; display: flex; background: #111; }
+  #thumb-strip canvas { flex-shrink: 0; }
+
+  .tl-mask { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,0.65); pointer-events: none; }
+  #mask-left  { left: 0; }
+  #mask-right { right: 0; }
+  #tl-range   { position: absolute; top: 0; bottom: 0; background: rgba(90,138,255,0.15); pointer-events: none; }
+  #scrubber   { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--accent); pointer-events: none; opacity: 0.9; }
+
+  .handle {
+    position: absolute; top: 0; bottom: 0; width: 12px;
+    cursor: ew-resize; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .handle::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--handle); }
+  .handle::after  { content: ''; display: block; width: 3px; height: 65%; background: var(--handle); border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,0.7); }
+  #handle-in  { transform: translateX(-50%); }
+  #handle-out { transform: translateX(-50%); }
+
+  /* ── Time inputs ── */
+  .time-inputs { display: flex; gap: 8px; }
+  .time-input-group { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+  .time-input-group label { font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+  .time-input-group input {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-family: Helvetica, Arial, sans-serif;
+    font-size: 11px; font-weight: 600; padding: 6px 8px; border-radius: var(--radius);
+    width: 100%; outline: none; font-variant-numeric: tabular-nums; transition: border-color 0.15s;
+  }
+  .time-input-group input:focus { border-color: var(--accent); }
+
+  /* ── Clip info ── */
+  #clip-info { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+  #clip-info b { color: var(--text); font-weight: 600; }
+  .accent { color: var(--accent); }
+
+  /* ── Progress ── */
+  #progress-wrap { display: none; flex-direction: column; gap: 8px; }
+  #progress-wrap.visible { display: flex; }
+  .progress-label { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
+  .progress-bar-bg { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.2s; }
+
+  /* ── Buttons ── */
+  .btn-row { display: flex; gap: 8px; margin-top: auto; }
+  button {
+    font-family: Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 700;
+    border: none; border-radius: var(--radius); padding: 10px 16px; cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  #btn-insert { flex: 1; background: var(--accent); color: #fff; }
+  #btn-insert:hover:not(:disabled) { background: var(--accent-dim); }
+  #btn-reset { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  #btn-reset:hover { color: var(--text); border-color: var(--muted); }
+
+  #status { font-size: 10px; color: var(--muted); text-align: center; min-height: 14px; }
+  #status.ok  { color: var(--accent); }
+  #status.err { color: var(--danger); }
+
+  .credit { font-size: 9px; color: #5d5d5d; text-align: center; margin-top: 4px; letter-spacing: 0.04em; }
+  .credit a { color: #3a3a3a; text-decoration: none; }
+  .credit a:hover { color: var(--muted); }
+
+  #canvas { display: none; }
+</style>
+</head>
+<body>
+
+<div>
+  <h1>Video Trimmer</h1>
+  <div class="subtitle">trim & insert to figma canvas</div>
+</div>
+
+<!-- File input lives outside dropzone — avoids blocking drag events -->
+<input type="file" id="file-input" accept="video/*" style="display:none" />
+
+<div id="dropzone">
+  <span class="drop-icon">✂️</span>
+  <div class="drop-label">
+    <span>Drop a video</span> or click to browse<br/>
+    MP4, MOV, WebM
+  </div>
+</div>
+
+<div id="preview-wrap">
+  <video id="video-preview" muted playsinline></video>
+
+  <div class="playhead-row">
+    <button id="btn-play">▶</button>
+    <div id="time-display"><span id="cur-time">0.00</span>s / <span id="tot-time">0.00</span>s</div>
+  </div>
+
+  <div id="timeline-wrap">
+    <div id="thumb-strip"></div>
+    <div class="tl-mask" id="mask-left"></div>
+    <div id="tl-range"></div>
+    <div class="tl-mask" id="mask-right"></div>
+    <div id="scrubber"></div>
+    <div class="handle" id="handle-in"></div>
+    <div class="handle" id="handle-out"></div>
+  </div>
+
+  <div class="time-inputs">
+    <div class="time-input-group"><label>In</label><input type="text" id="input-in" value="0.00" /></div>
+    <div class="time-input-group"><label>Out</label><input type="text" id="input-out" value="0.00" /></div>
+  </div>
+
+  <div id="clip-info">
+    <span>duration <b id="ci-dur">—</b></span>
+    <span>size <b id="ci-size">—</b></span>
+    <span class="accent" id="ci-range">—</span>
+  </div>
+</div>
+
+<div id="progress-wrap">
+  <div class="progress-label">
+    <span id="progress-lbl">Processing...</span>
+  </div>
+  <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-bar"></div></div>
+</div>
+
+<div id="status"></div>
+
+<div class="btn-row">
+  <button id="btn-reset">↺ Reset</button>
+  <button id="btn-insert" disabled>▶ Insert into Figma</button>
+</div>
+
+<div class="credit">plugin by <a href="https://asierleoz.com" target="_blank">asierleoz.com</a></div>
+<canvas id="canvas"></canvas>
+
+<script>
+const dropzone     = document.getElementById('dropzone');
+const fileInput    = document.getElementById('file-input');
+const previewWrap  = document.getElementById('preview-wrap');
+const videoPreview = document.getElementById('video-preview');
+const btnPlay      = document.getElementById('btn-play');
+const curTimeEl    = document.getElementById('cur-time');
+const totTimeEl    = document.getElementById('tot-time');
+const timelineWrap = document.getElementById('timeline-wrap');
+const thumbStrip   = document.getElementById('thumb-strip');
+const maskLeft     = document.getElementById('mask-left');
+const maskRight    = document.getElementById('mask-right');
+const tlRange      = document.getElementById('tl-range');
+const scrubberEl   = document.getElementById('scrubber');
+const handleIn     = document.getElementById('handle-in');
+const handleOut    = document.getElementById('handle-out');
+const inputIn      = document.getElementById('input-in');
+const inputOut     = document.getElementById('input-out');
+const ciDur        = document.getElementById('ci-dur');
+const ciSize       = document.getElementById('ci-size');
+const ciRange      = document.getElementById('ci-range');
+const progressWrap = document.getElementById('progress-wrap');
+const progressBar  = document.getElementById('progress-bar');
+const progressLbl  = document.getElementById('progress-lbl');
+const statusEl     = document.getElementById('status');
+const btnInsert    = document.getElementById('btn-insert');
+const btnReset     = document.getElementById('btn-reset');
+const canvas       = document.getElementById('canvas');
+const ctx          = canvas.getContext('2d');
+
+let duration     = 0;
+let inTime       = 0;
+let outTime      = 0;
+let isProcessing = false;
+let selectedFile = null;
+let blobUrl      = null;
+let dragging     = null;
+let tlRect       = null;
+
+const THUMB_COUNT = 10;
+
+function pickMediaRecorderMimeType() {
+  // Pick the first codec supported by the current browser (Figma UI uses Chromium).
+  const candidates = [
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm'
+  ];
+  for (const m of candidates) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';
+}
+
+function seekTo(time) {
+  // Ensure the UI waits for the decoder to be ready at `time`.
+  return new Promise((resolve, reject) => {
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('Failed to seek video'));
+    };
+    const cleanup = () => {
+      videoPreview.removeEventListener('seeked', onSeeked);
+      videoPreview.removeEventListener('error', onError);
+    };
+
+    videoPreview.addEventListener('seeked', onSeeked);
+    videoPreview.addEventListener('error', onError);
+    videoPreview.currentTime = time;
+  });
+}
+
+async function recordTrimmedClip(start, dur) {
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('MediaRecorder not supported in this environment (cannot trim).');
+  }
+  if (typeof videoPreview.captureStream !== 'function') {
+    throw new Error('captureStream not supported in this environment (cannot trim).');
+  }
+
+  const mimeType = pickMediaRecorderMimeType();
+  const stream = videoPreview.captureStream();
+
+  if (!stream) throw new Error('Failed to capture video stream');
+
+  // Audio depends on browser support; video-only is still OK.
+  const hasAudio = stream.getAudioTracks && stream.getAudioTracks().length > 0;
+  if (!hasAudio) setStatus('Recording video only (no audio).', 'ok');
+
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const chunks = [];
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+
+  const stopped = new Promise((resolve) => {
+    recorder.onstop = () => resolve();
+  });
+
+  // Prepare the first frame.
+  videoPreview.pause();
+  await seekTo(start);
+
+  // Start recording and playback.
+  recorder.start();
+  await videoPreview.play().catch(() => {});
+
+  const endTime = start + dur;
+  let finished = false;
+
+  const stopNow = () => {
+    if (finished) return;
+    finished = true;
+    try { videoPreview.pause(); } catch (e) {}
+    try { videoPreview.removeEventListener('timeupdate', onTimeUpdate); } catch (e) {}
+    try { recorder.stop(); } catch (e) {}
+  };
+
+  const safetyTimer = setTimeout(() => stopNow(), (dur * 1000) + 300);
+  function onTimeUpdate() {
+    if (finished) return;
+    if (videoPreview.currentTime >= endTime - 0.03) {
+      clearTimeout(safetyTimer);
+      videoPreview.removeEventListener('timeupdate', onTimeUpdate);
+      stopNow();
+    }
+  }
+  videoPreview.addEventListener('timeupdate', onTimeUpdate);
+
+  await stopped;
+
+  const finalType = recorder.mimeType || mimeType || 'video/webm';
+  return new Blob(chunks, { type: finalType });
+}
+
+// ── Drop & click ──────────────────────────────────────────
+dropzone.addEventListener('click', () => fileInput.click());
+
+// Prevent browser from opening the file on accidental drop outside the zone
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop',     e => e.preventDefault());
+
+dropzone.addEventListener('dragover', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropzone.classList.add('drag-over');
+});
+dropzone.addEventListener('dragleave', e => {
+  e.stopPropagation();
+  dropzone.classList.remove('drag-over');
+});
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropzone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('video/')) loadVideo(f);
+  else setStatus('Only video files are supported', 'err');
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) loadVideo(fileInput.files[0]);
+  fileInput.value = '';
+});
+
+// ── Load ──────────────────────────────────────────────────
+function loadVideo(file) {
+  selectedFile = file;
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = URL.createObjectURL(file);
+
+  setStatus('Loading...');
+  btnInsert.disabled = true;
+  previewWrap.classList.remove('visible');
+
+  videoPreview.src = blobUrl;
+  videoPreview.load();
+
+  videoPreview.addEventListener('loadedmetadata', onMeta, { once: true });
+  videoPreview.addEventListener('error', () => setStatus('Cannot read video file', 'err'), { once: true });
+}
+
+async function onMeta() {
+  duration = videoPreview.duration;
+  inTime   = 0;
+  outTime  = duration;
+
+  totTimeEl.textContent = fmt(duration);
+  ciSize.textContent    = videoPreview.videoWidth + '×' + videoPreview.videoHeight;
+
+  previewWrap.classList.add('visible');
+  setStatus('');
+  updateHandles();
+  updateInfo();
+  btnInsert.disabled = false;
+
+  // Wait for layout paint before reading offsetWidth
+  requestAnimationFrame(() => requestAnimationFrame(buildThumbs));
+}
+
+// ── Thumbnails ────────────────────────────────────────────
+async function buildThumbs() {
+  thumbStrip.innerHTML = '';
+  const totalW = timelineWrap.offsetWidth || 340;
+  const TW = Math.floor(totalW / THUMB_COUNT);
+  const TH = 48;
+
+  const canvases = Array.from({ length: THUMB_COUNT }, () => {
+    const c = document.createElement('canvas');
+    c.width  = TW;
+    c.height = TH;
+    c.style.cssText = `width:${TW}px;height:${TH}px;flex-shrink:0`;
+    thumbStrip.appendChild(c);
+    return c;
+  });
+
+  for (let i = 0; i < THUMB_COUNT; i++) {
+    const t = (i / (THUMB_COUNT - 1)) * (duration * 0.98);
+    await seekAndDraw(canvases[i], t);
+  }
+}
+
+function seekAndDraw(c, t) {
+  return new Promise(resolve => {
+    const cctx   = c.getContext('2d');
+    let resolved = false;
+
+    const draw = () => {
+      if (resolved) return;
+      resolved = true;
+      videoPreview.onseeked = null;
+      cctx.drawImage(videoPreview, 0, 0, c.width, c.height);
+      resolve();
+    };
+
+    videoPreview.onseeked = draw;
+    videoPreview.currentTime = Math.max(0, Math.min(t, duration - 0.05));
+
+    // Safety timeout for stubborn codecs
+    setTimeout(draw, 1000);
+  });
+}
+
+// ── Timeline helpers ──────────────────────────────────────
+const fmt      = t => t.toFixed(2);
+const tlW      = ()  => timelineWrap.offsetWidth || 340;
+const tlXfromT = t   => (t / duration) * tlW();
+const tlTfromX = x   => Math.max(0, Math.min(duration, (x / tlW()) * duration));
+
+function updateHandles() {
+  const w    = tlW();
+  const xIn  = tlXfromT(inTime);
+  const xOut = tlXfromT(outTime);
+
+  handleIn.style.left   = xIn  + 'px';
+  handleOut.style.left  = xOut + 'px';
+  maskLeft.style.width  = xIn  + 'px';
+  maskRight.style.left  = xOut + 'px';
+  maskRight.style.width = (w - xOut) + 'px';
+  tlRange.style.left    = xIn  + 'px';
+  tlRange.style.width   = (xOut - xIn) + 'px';
+
+  inputIn.value  = fmt(inTime);
+  inputOut.value = fmt(outTime);
+}
+
+function updateScrubber(t) {
+  scrubberEl.style.left = tlXfromT(t) + 'px';
+  curTimeEl.textContent = fmt(t);
+}
+
+function updateInfo() {
+  ciDur.textContent   = fmt(outTime - inTime) + 's';
+  ciRange.textContent = fmt(inTime) + 's → ' + fmt(outTime) + 's';
+}
+
+// ── Drag handles ──────────────────────────────────────────
+handleIn.addEventListener('mousedown',  e => { e.stopPropagation(); startDrag(e, 'in'); });
+handleOut.addEventListener('mousedown', e => { e.stopPropagation(); startDrag(e, 'out'); });
+timelineWrap.addEventListener('mousedown', e => startDrag(e, 'scrub'));
+
+function startDrag(e, type) {
+  e.preventDefault();
+  dragging = type;
+  tlRect   = timelineWrap.getBoundingClientRect();
+}
+
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const t = tlTfromX(e.clientX - tlRect.left);
+  if (dragging === 'in') {
+    inTime = Math.min(t, outTime - 0.05);
+    updateHandles();
+    videoPreview.currentTime = inTime;
+    updateScrubber(inTime);
+    updateInfo();
+  } else if (dragging === 'out') {
+    outTime = Math.max(t, inTime + 0.05);
+    updateHandles();
+    videoPreview.currentTime = outTime;
+    updateScrubber(outTime);
+    updateInfo();
+  } else {
+    videoPreview.currentTime = t;
+    updateScrubber(t);
+  }
+});
+
+window.addEventListener('mouseup', () => { dragging = null; });
+
+timelineWrap.addEventListener('click', e => {
+  if (!duration) return;
+  tlRect = timelineWrap.getBoundingClientRect();
+  const t = tlTfromX(e.clientX - tlRect.left);
+  videoPreview.currentTime = t;
+  updateScrubber(t);
+});
+
+// ── Playback ──────────────────────────────────────────────
+btnPlay.addEventListener('click', () => {
+  if (videoPreview.paused) {
+    if (videoPreview.currentTime >= outTime || videoPreview.currentTime < inTime)
+      videoPreview.currentTime = inTime;
+    videoPreview.play();
+    btnPlay.textContent = '⏸';
+  } else {
+    videoPreview.pause();
+    btnPlay.textContent = '▶';
+  }
+});
+
+videoPreview.addEventListener('timeupdate', () => {
+  updateScrubber(videoPreview.currentTime);
+  if (videoPreview.currentTime >= outTime) {
+    videoPreview.pause();
+    btnPlay.textContent = '▶';
+  }
+});
+
+// ── Manual time inputs ────────────────────────────────────
+inputIn.addEventListener('change', () => {
+  const v = parseFloat(inputIn.value);
+  if (!isNaN(v)) { inTime = Math.max(0, Math.min(v, outTime - 0.05)); updateHandles(); updateInfo(); }
+});
+inputOut.addEventListener('change', () => {
+  const v = parseFloat(inputOut.value);
+  if (!isNaN(v)) { outTime = Math.min(duration, Math.max(v, inTime + 0.05)); updateHandles(); updateInfo(); }
+});
+
+// ── Insert ────────────────────────────────────────────────
+btnInsert.addEventListener('click', async () => {
+  if (isProcessing || !selectedFile) return;
+  isProcessing = true;
+  btnInsert.disabled = true;
+  setStatus('');
+  progressLbl.textContent = 'Reading file...';
+  progressBar.style.width = '15%';
+  progressWrap.classList.add('visible');
+
+  try {
+    const start = Math.max(0, inTime);
+    const dur = Math.max(0.05, outTime - inTime);
+
+    progressLbl.textContent = 'Recording trimmed clip...';
+    progressBar.style.width = '35%';
+
+    // Figma native VIDEO fills cannot trim by `inTime/outTime` metadata.
+    // So we record only the selected time range into a new WebM blob.
+    progressLbl.textContent = 'Capturing segment...';
+    progressBar.style.width = '60%';
+
+    const trimmedBlob = await recordTrimmedClip(start, dur);
+    const ab = await trimmedBlob.arrayBuffer();
+
+    progressBar.style.width = '85%';
+    progressLbl.textContent = 'Sending to Figma...';
+
+    parent.postMessage({
+      pluginMessage: {
+        type:   'insert-video',
+        bytes:  Array.from(new Uint8Array(ab)),
+        width:  videoPreview.videoWidth,
+        height: videoPreview.videoHeight,
+        inTime,
+        outTime,
+      }
+    }, '*');
+
+  } catch (err) {
+    progressWrap.classList.remove('visible');
+    setStatus('Error: ' + err.message, 'err');
+    btnInsert.disabled = false;
+    isProcessing = false;
+  }
+});
+
+// ── Plugin messages ───────────────────────────────────────
+window.onmessage = (e) => {
+  const msg = e.data.pluginMessage;
+  if (!msg) return;
+  if (msg.type === 'done') {
+    progressBar.style.width = '100%';
+    setTimeout(() => { progressWrap.classList.remove('visible'); progressBar.style.width = '0%'; }, 500);
+    setStatus('✓ Video inserted into Figma', 'ok');
+    btnInsert.disabled = false;
+    isProcessing = false;
+  }
+  if (msg.type === 'error') {
+    progressWrap.classList.remove('visible');
+    setStatus('Figma error: ' + msg.message, 'err');
+    btnInsert.disabled = false;
+    isProcessing = false;
+  }
+};
+
+// ── Reset ─────────────────────────────────────────────────
+btnReset.addEventListener('click', () => {
+  videoPreview.pause();
+  videoPreview.src = '';
+  if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+  selectedFile = null;
+  duration = inTime = outTime = 0;
+  thumbStrip.innerHTML = '';
+  previewWrap.classList.remove('visible');
+  progressWrap.classList.remove('visible');
+  progressBar.style.width = '0%';
+  btnPlay.textContent = '▶';
+  btnInsert.disabled = true;
+  setStatus('');
+});
+
+function setStatus(msg, type = '') {
+  statusEl.textContent = msg;
+  statusEl.className   = type;
+}
+</script>
+</body>
+</html>
