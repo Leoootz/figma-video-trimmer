@@ -42,7 +42,6 @@ figma.ui.onmessage = async (msg) => {
 
       figma.currentPage.appendChild(frame);
       figma.currentPage.selection = [frame];
-      figma.viewport.scrollAndZoomIntoView([frame]);
 
       figma.ui.postMessage({ type: 'done' });
 
